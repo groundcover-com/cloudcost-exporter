@@ -9,6 +9,7 @@ import (
 
 	"cloud.google.com/go/billing/apiv1/billingpb"
 
+	"github.com/grafana/cloudcost-exporter/pkg/pricingcsv"
 	"github.com/grafana/cloudcost-exporter/pkg/utils"
 )
 
@@ -165,6 +166,65 @@ func (m StructuredPricingMap) GetCostOfStorage(region, storageClass string) (flo
 		return 0, fmt.Errorf("%w: %s", FamilyTypeNotFound, storageClass)
 	}
 	return m.Storage[region].Storage[storageClass], nil
+}
+
+func (m *StructuredPricingMap) ToCSV(path string) error {
+	csvWriter, err := pricingcsv.NewCSVWriter(path)
+	if err != nil {
+		return err
+	}
+	defer csvWriter.Close()
+
+	fmt.Println("Exporting compute pricing map to CSV")
+
+	for region, computePrices := range m.Compute {
+		for instanceType, prices := range computePrices.Family {
+			spotRecord := pricingcsv.Entry{
+				Provider:     "gcp",
+				Service:      "compute",
+				Region:       region,
+				Zone:         region,
+				InstanceType: instanceType,
+				CapacityType: "spot",
+				Price:        0,
+				PricePerCore: prices.Spot.Cpu,
+				PricePerGiB:  prices.Spot.Ram,
+			}
+
+			onDemandRecord := pricingcsv.Entry{
+				Provider:     "gcp",
+				Service:      "compute",
+				Region:       region,
+				Zone:         region,
+				InstanceType: instanceType,
+				CapacityType: "on_demand",
+				Price:        0,
+				PricePerCore: prices.OnDemand.Cpu,
+				PricePerGiB:  prices.OnDemand.Ram,
+			}
+
+			csvWriter.AddEntry(&spotRecord)
+			csvWriter.AddEntry(&onDemandRecord)
+		}
+	}
+
+	fmt.Println("Exporting storage pricing map to CSV")
+
+	for region, storagePrices := range m.Storage {
+		for storageClass, price := range storagePrices.Storage {
+			record := pricingcsv.Entry{
+				Provider:    "gcp",
+				Service:     "storage",
+				Region:      region,
+				Zone:        region,
+				StorageType: storageClass,
+				Price:       price,
+			}
+			csvWriter.AddEntry(&record)
+		}
+	}
+
+	return nil
 }
 
 var (

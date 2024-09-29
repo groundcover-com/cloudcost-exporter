@@ -20,6 +20,7 @@ import (
 
 	ec2client "github.com/grafana/cloudcost-exporter/pkg/aws/services/ec2"
 	pricingClient "github.com/grafana/cloudcost-exporter/pkg/aws/services/pricing"
+	"github.com/grafana/cloudcost-exporter/pkg/pricingcsv"
 )
 
 const (
@@ -101,6 +102,41 @@ func NewStoragePricingMap(l *slog.Logger) *StoragePricingMap {
 	}
 }
 
+func (cpm *ComputePricingMap) ToCSV(path string) error {
+	csvWriter, err := pricingcsv.NewCSVWriter(path)
+	if err != nil {
+		return err
+	}
+	defer csvWriter.Close()
+
+	for region, regionData := range cpm.Regions {
+		for instanceType, instanceData := range regionData.Family {
+			regionName := region
+			capacityType := "on_demand"
+			lastRegionChar := region[len(region)-1:]
+			if lastRegionChar >= "a" && lastRegionChar <= "z" {
+				regionName = region[:len(region)-1]
+				capacityType = "spot"
+			}
+
+			record := pricingcsv.Entry{
+				Provider:     "aws",
+				Service:      "compute",
+				Region:       regionName,
+				Zone:         region,
+				InstanceType: instanceType,
+				CapacityType: capacityType,
+				Price:        instanceData.Total,
+				PricePerCore: instanceData.Cpu,
+				PricePerGiB:  instanceData.Ram,
+			}
+
+			csvWriter.AddEntry(&record)
+		}
+	}
+	return nil
+}
+
 // GenerateComputePricingMap accepts a list of ondemand prices and a list of spot prices.
 // The method needs to
 // 1. Parse out the ondemand prices and generate a productTerm map for each instance type
@@ -150,6 +186,36 @@ func (cpm *ComputePricingMap) GenerateComputePricingMap(ondemandPrices []string,
 		if err != nil {
 			cpm.logger.Error(fmt.Sprintf("error adding to pricing map: %s", err))
 			continue
+		}
+	}
+	return nil
+}
+
+func (spm *StoragePricingMap) ToCSV(path string) error {
+	csvWriter, err := pricingcsv.NewCSVWriter(path)
+	if err != nil {
+		return err
+	}
+	defer csvWriter.Close()
+
+	for region, regionData := range spm.Regions {
+		for storageType, price := range regionData.Storage {
+			regionName := region
+			lastRegionChar := region[len(region)-1:]
+			if lastRegionChar >= "a" && lastRegionChar <= "z" {
+				regionName = region[:len(region)-1]
+			}
+
+			record := pricingcsv.Entry{
+				Provider:    "aws",
+				Service:     "storage",
+				Region:      regionName,
+				Zone:        region,
+				StorageType: storageType,
+				Price:       price,
+			}
+
+			csvWriter.AddEntry(&record)
 		}
 	}
 	return nil
